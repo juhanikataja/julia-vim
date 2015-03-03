@@ -43,9 +43,10 @@ function GetJuliaNestingStruct(lnum)
   let s = 0
   let blocks_stack = []
   let num_closed_blocks = 0
+  let num_unmet_close_paren = 0
   while 1
-    let fb = JuliaMatch(a:lnum, line, '@\@<!\<\%(if\|else\%(if\)\=\|while\|for\|try\|catch\|finally\|\%(staged\)\?function\|macro\|begin\|type\|immutable\|let\|\%(bare\)\?module\|quote\|do\)\>', s)
-    let fe = JuliaMatch(a:lnum, line, '@\@<!\<end\>', s)
+    let fb = JuliaMatch(a:lnum, line, '@\@<!\%(\<\%(if\|else\%(if\)\=\|while\|for\|try\|catch\|finally\|\%(staged\)\?function\|macro\|begin\|type\|immutable\|let\|\%(bare\)\?module\|quote\|do\)\>\|(\)', s)
+    let fe = JuliaMatch(a:lnum, line, '@\@<!\%(\<end\>\|)\)', s)
 
     if fb < 0 && fe < 0
       " No blocks found
@@ -56,6 +57,17 @@ function GetJuliaNestingStruct(lnum)
       " The first occurrence is an opening block keyword
       " Note: some keywords (elseif,else,catch,finally) are both
       "       closing blocks and opening new ones
+
+      let i = JuliaMatch(a:lnum, line, '@\@<!(', s)
+      if i >= 0 && i == fb
+         let s = i+1
+         if len(blocks_stack) > 0
+           let blocks_stack[-1] = 'paren'
+         else
+           call add(blocks_stack, 'paren')
+         endif
+         continue
+      endif
 
       let i = JuliaMatch(a:lnum, line, '@\@<!\<if\>', s)
       if i >= 0 && i == fb
@@ -126,7 +138,9 @@ function GetJuliaNestingStruct(lnum)
         continue
       endif
 
+
       let i = JuliaMatch(a:lnum, line, '@\@<!\<\%(while\|for\|\%(staged\)\?function\|macro\|begin\|type\|immutable\|let\|quote\|do\)\>', s)
+
       if i >= 0 && i == fb
         let s = i+1
         call add(blocks_stack, 'other')
@@ -137,8 +151,20 @@ function GetJuliaNestingStruct(lnum)
       break
 
     else
-      " The first occurrence is an 'end'
 
+      " The first occurence is a closing parentheses
+      let i = JuliaMatch(a:lnum, line, '@\@<!)', s)
+      if i >= 0 && i == fe
+         let s = i+1
+         if len(blocks_stack)  == 0
+           let num_unmet_close_paren += 1
+         else
+           call remove(blocks_stack, 'paren')
+         end
+         continue
+      endif
+
+      " The first occurrence is an 'end'
       let s = fe+1
       if len(blocks_stack) == 0
         let num_closed_blocks += 1
@@ -152,8 +178,8 @@ function GetJuliaNestingStruct(lnum)
     " Note: it should be impossible to get here
     break
   endwhile
-  let num_open_blocks = len(blocks_stack) - count(blocks_stack, 'col1module')
-  return [num_open_blocks, num_closed_blocks]
+  let num_open_blocks = len(blocks_stack)  - count(blocks_stack, 'col1module')
+  return [num_open_blocks, num_closed_blocks, num_unmet_close_paren]
 endfunction
 
 function GetJuliaIndent()
@@ -166,6 +192,7 @@ function GetJuliaIndent()
   " At the start of the file use zero indent.
   if lnum == 0
     let &ignorecase = s:save_ignorecase
+
     unlet s:save_ignorecase
     return 0
   endif
@@ -173,7 +200,7 @@ function GetJuliaIndent()
   let ind = indent(lnum)
 
   " Analyse previous line
-  let [num_open_blocks, num_closed_blocks] = GetJuliaNestingStruct(lnum)
+  let [num_open_blocks, num_closed_blocks, num_unmet_close_paren] = GetJuliaNestingStruct(lnum)
 
   " Increase indentation for each newly opened block
   " in the previous line
@@ -182,8 +209,14 @@ function GetJuliaIndent()
     let num_open_blocks -= 1
   endwhile
 
+  " Decrease indentation for each unmet closed paren
+  while num_unmet_close_paren > 0
+    let ind -= &sw
+    let num_unmet_close_paren -= 1
+  endwhile
+
   " Analyse current line
-  let [num_open_blocks, num_closed_blocks] = GetJuliaNestingStruct(v:lnum)
+  let [num_open_blocks, num_closed_blocks, num_unmet_close_paren] = GetJuliaNestingStruct(v:lnum)
 
   " Decrease indentation for each closed block
   " in the current line
