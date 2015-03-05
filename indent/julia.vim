@@ -45,8 +45,8 @@ function GetJuliaNestingStruct(lnum)
   let num_closed_blocks = 0
   let num_unmet_close_paren = 0
   while 1
-    let fb = JuliaMatch(a:lnum, line, '@\@<!\%(\<\%(if\|else\%(if\)\=\|while\|for\|try\|catch\|finally\|\%(staged\)\?function\|macro\|begin\|type\|immutable\|let\|\%(bare\)\?module\|quote\|do\)\>\|(\)', s)
-    let fe = JuliaMatch(a:lnum, line, '@\@<!\%(\<end\>\|)\)', s)
+    let fb = JuliaMatch(a:lnum, line, '@\@<!\%(\<\%(if\|else\%(if\)\=\|while\|for\|try\|catch\|finally\|\%(staged\)\?function\|macro\|begin\|type\|immutable\|let\|\%(bare\)\?module\|quote\|do\)\>\|(\|[\|{\)', s)
+    let fe = JuliaMatch(a:lnum, line, '@\@<!\%(\<end\>\|)\|]\|}\)', s)
 
     if fb < 0 && fe < 0
       " No blocks found
@@ -58,14 +58,10 @@ function GetJuliaNestingStruct(lnum)
       " Note: some keywords (elseif,else,catch,finally) are both
       "       closing blocks and opening new ones
 
-      let i = JuliaMatch(a:lnum, line, '@\@<!(', s)
+      let i = JuliaMatch(a:lnum, line, '@\@<!\%((\|[\|{\)', s)
       if i >= 0 && i == fb
          let s = i+1
-         if len(blocks_stack) > 0
-           let blocks_stack[-1] = 'paren'
-         else
-           call add(blocks_stack, 'paren')
-         endif
+         let num_unmet_close_paren -= 1
          continue
       endif
 
@@ -153,14 +149,10 @@ function GetJuliaNestingStruct(lnum)
     else
 
       " The first occurence is a closing parentheses
-      let i = JuliaMatch(a:lnum, line, '@\@<!)', s)
+      let i = JuliaMatch(a:lnum, line, '@\@<!\%()\|]\|}\)', s)
       if i >= 0 && i == fe
          let s = i+1
-         if len(blocks_stack)  == 0
            let num_unmet_close_paren += 1
-         else
-           call remove(blocks_stack, 'paren')
-         end
          continue
       endif
 
@@ -213,6 +205,12 @@ function GetJuliaIndent()
   while num_unmet_close_paren > 0
     let ind -= &sw
     let num_unmet_close_paren -= 1
+  endwhile
+ 
+  " Increase indentation for each unmet open paren
+  while num_unmet_close_paren < 0
+    let ind += &sw
+    let num_unmet_close_paren += 1
   endwhile
 
   " Analyse current line
